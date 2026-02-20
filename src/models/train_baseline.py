@@ -1,10 +1,8 @@
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_score
-from sklearn.preprocessing import StandardScaler
 
 from src.data_loader import load_application_train
 from src.preprocessing import clean_data
