@@ -1,69 +1,73 @@
-import pandas as pd
-import numpy as np
-from sklearn.model_selection import StratifiedKFold
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
-from sklearn.preprocessing import LabelEncoder
+from sklearn.model_selection import cross_val_score
 
-from data_loader import load_application_train
-
-
-def preprocess(df):
-    # Create a copy to avoid modifying original DataFrame
-    df = df.copy()
-
-    # Extract target variable
-    y = df["TARGET"]
-
-    # Remove target and ID column from features
-    X = df.drop(columns=["TARGET", "SK_ID_CURR"])
-
-    # Fill missing values with constant
-    X = X.fillna(-999)
-
-    # Encode categorical features
-    for col in X.select_dtypes(include=["object", "string"]).columns:
-        le = LabelEncoder()
-        X[col] = le.fit_transform(X[col].astype(str))
-
-    return X, y
-
+from src.data_loader import load_application_train
+from src.preprocessing import clean_data
 
 def train():
-    # Load dataset
+    """
+    Train baseline Logistic Regression model
+    using 5-fold cross-validation and evaluate ROC-AUC.
+    """
     df = load_application_train("data/raw")
+    df = clean_data(df)
 
-    # Preprocess data
-    X, y = preprocess(df)
+    # Load and clean the dataset
+    X = df.drop(columns=["TARGET"])
+    y = df["TARGET"]
 
-    # Initialize Logistic Regression model
-    model = LogisticRegression(max_iter=1000)
+    # Identify numerical and categorical columns
+    num_cols = X.select_dtypes(include=["int64", "float64"]).columns
+    cat_cols = X.select_dtypes(include=["object", "string"]).columns
 
-    # Create Stratified 5-fold cross-validation
-    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
 
-    scores = []
+    # Preprocessing pipelines
+    # Numerical pipeline:
+    # - Fill missing values with median
+    # - Scale features for better convergence
+    numeric_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler())
+    ])
 
-    # Perform cross-validation
-    for train_idx, val_idx in skf.split(X, y):
+    # Categorical pipeline:
+    # - Fill missing values with "Unknown"
+    # - Apply One-Hot Encoding
+    categorical_transformer = Pipeline([
+        ("imputer", SimpleImputer(strategy="constant", fill_value="Unknown")),
+        ("encoder", OneHotEncoder(handle_unknown="ignore"))
+    ])
 
-        # Split data into train and validation sets
-        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+    # Combine numerical and categorical preprocessing
+    preprocessor = ColumnTransformer([
+        ("num", numeric_transformer, num_cols),
+        ("cat", categorical_transformer, cat_cols)
+    ])
 
-        # Train model
-        model.fit(X_train, y_train)
+    # Define baseline model
+    model = Pipeline([
+        ("preprocessing", preprocessor),
+        ("classifier", LogisticRegression(max_iter=3000, class_weight="balanced"))
+    ])
 
-        # Get predicted probabilities for class 1
-        preds = model.predict_proba(X_val)[:, 1]
+    # Model evaluation
+        # Perform 5-fold cross-validation
+        # Evaluate using ROC-AUC metric
+    scores = cross_val_score(
+        model,
+        X,
+        y,
+        cv=5,
+        scoring="roc_auc",
+        n_jobs=-1
+    )
 
-        # Calculate ROC-AUC
-        score = roc_auc_score(y_val, preds)
-        scores.append(score)
-
-    # Print mean and std of CV scores
-    print(f"CV ROC-AUC: {np.mean(scores):.4f} ± {np.std(scores):.4f}")
-
+    print("ROC-AUC per fold:", scores)
+    print("Mean ROC-AUC:", scores.mean())
 
 if __name__ == "__main__":
     train()
